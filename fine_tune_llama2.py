@@ -78,7 +78,7 @@ use_nested_quant = False
 output_dir = "./results"
 
 # Number of training epochs
-num_train_epochs = 1
+num_train_epochs = 2
 
 # Enable fp16/bf16 training (set bf16 to True with an A100)
 fp16 = False
@@ -91,7 +91,7 @@ per_device_train_batch_size = 1 if not has_cuda else 4
 per_device_eval_batch_size = 1 if not has_cuda else 4
 
 # Number of update steps to accumulate the gradients for
-gradient_accumulation_steps = 4 if not has_cuda else 1
+gradient_accumulation_steps = 8 if not has_cuda else 1
 
 # Enable gradient checkpointing
 gradient_checkpointing = True
@@ -100,7 +100,7 @@ gradient_checkpointing = True
 max_grad_norm = 0.3
 
 # Initial learning rate (AdamW optimizer)
-learning_rate = 2e-4
+learning_rate = 1e-4
 
 # Weight decay to apply to all layers except bias/LayerNorm weights
 weight_decay = 0.001
@@ -112,7 +112,7 @@ optim = "paged_adamw_32bit" if has_cuda else "adamw_torch"
 lr_scheduler_type = "cosine"
 
 # Number of training steps (overrides num_train_epochs)
-max_steps = 100 if not has_cuda else -1
+max_steps = 400 if not has_cuda else -1
 
 # Ratio of steps for a linear warmup (from 0 to learning rate)
 warmup_ratio = 0.03
@@ -142,6 +142,14 @@ packing = False
 
 # Let Transformers choose an appropriate device map
 device_map = "auto"
+
+# Generation defaults (can be overridden via CLI)
+gen_max_new_tokens = 200
+gen_temperature = 0.7
+gen_top_p = 0.9
+gen_repetition_penalty = 1.1
+demo_mode = False
+dataset_jsonl_path = None
 
 def build_bnb_config():
     compute_dtype = getattr(torch, bnb_4bit_compute_dtype)
@@ -198,20 +206,88 @@ def _extract_assistant_text(generated_text):
     return generated_text.strip()
 
 
+def _format_model_input(tokenizer_obj, prompt):
+    clean_prompt = _normalize_prompt(prompt)
+    if hasattr(tokenizer_obj, "apply_chat_template"):
+        try:
+            messages = [{"role": "user", "content": clean_prompt}]
+            return tokenizer_obj.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+        except Exception:
+            pass
+    return f"<s>[INST] {clean_prompt} [/INST]"
+
+
+def _format_training_example(tokenizer_obj, prompt, answer):
+    prompt = _normalize_prompt(prompt)
+    answer = answer.strip()
+    if hasattr(tokenizer_obj, "apply_chat_template"):
+        try:
+            messages = [
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": answer},
+            ]
+            return tokenizer_obj.apply_chat_template(messages, tokenize=False)
+        except Exception:
+            pass
+    return f"<s>[INST] {prompt} [/INST] {answer}"
+
+
+def _prepare_training_dataset(dataset, tokenizer_obj):
+    column_names = set(dataset.column_names)
+    if "prompt" in column_names and "text" in column_names:
+        # Distillation-style data: convert prompt+answer into single chat-formatted text.
+        return dataset.map(
+            lambda ex: {"text": _format_training_example(tokenizer_obj, ex["prompt"], ex["text"])},
+            desc="Formatting prompt+answer training samples",
+        )
+    return dataset
+
+
+def _generate_text(pipe, tokenizer_obj, prompt):
+    model_input = _format_model_input(tokenizer_obj, prompt)
+    generated = pipe(model_input)[0]["generated_text"]
+    if generated.startswith(model_input):
+        return generated[len(model_input):].strip()
+    return _extract_assistant_text(generated)
+
+
 def _build_generation_pipe(model_obj, tokenizer_obj):
+    do_sample = gen_temperature > 0
+    pipe_kwargs = {
+        "task": "text-generation",
+        "model": model_obj,
+        "tokenizer": tokenizer_obj,
+        "max_new_tokens": gen_max_new_tokens,
+        "do_sample": do_sample,
+        "repetition_penalty": gen_repetition_penalty,
+    }
+    if do_sample:
+        pipe_kwargs["temperature"] = gen_temperature
+        pipe_kwargs["top_p"] = gen_top_p
     return pipeline(
-        task="text-generation",
-        model=model_obj,
-        tokenizer=tokenizer_obj,
-        max_new_tokens=200,
-        do_sample=False,
+        **pipe_kwargs
     )
+
+
+def _wrap_text_preserving_newlines(text, width=100):
+    wrapped_lines = []
+    for line in text.splitlines():
+        if not line.strip():
+            wrapped_lines.append("")
+            continue
+        wrapped_lines.append(textwrap.fill(line, width=width))
+    return "\n".join(wrapped_lines).strip()
 
 
 def _print_response_block(title, text):
     print(f"\n{title}")
     print("-" * len(title))
-    print(textwrap.fill(text, width=100))
+    formatted = _wrap_text_preserving_newlines(text, width=100 if demo_mode else 110)
+    print(formatted)
 
 
 def load_model_and_tokenizer_for_inference(base_model_id, adapter_dir=None):
@@ -307,9 +383,14 @@ def build_trainer(model, tokenizer, dataset):
 
 
 def train_and_save():
-    dataset = load_dataset(dataset_name, split="train")
+    if dataset_jsonl_path:
+        dataset = load_dataset("json", data_files=dataset_jsonl_path, split="train")
+        print(f"Using local JSONL dataset: {dataset_jsonl_path}")
+    else:
+        dataset = load_dataset(dataset_name, split="train")
     model = load_base_model_for_training()
     tokenizer = load_tokenizer(model_name)
+    dataset = _prepare_training_dataset(dataset, tokenizer)
     trainer = build_trainer(model, tokenizer, dataset)
     trainer.train()
     trainer.model.save_pretrained(new_model)
@@ -325,9 +406,7 @@ def run_prompt(prompt):
     logging.set_verbosity(logging.CRITICAL)
     model, tokenizer = load_finetuned_for_inference()
     pipe = _build_generation_pipe(model, tokenizer)
-    clean_prompt = _normalize_prompt(prompt)
-    result = pipe(f"<s>[INST] {clean_prompt} [/INST]")
-    answer = _extract_assistant_text(result[0]["generated_text"])
+    answer = _generate_text(pipe, tokenizer, prompt)
     _print_response_block("Assistant", answer)
 
 
@@ -343,17 +422,13 @@ def run_interactive():
         if prompt.lower() in {"exit", "quit"}:
             print("Exiting interactive mode.")
             break
-        clean_prompt = _normalize_prompt(prompt)
-        result = pipe(f"<s>[INST] {clean_prompt} [/INST]")
-        answer = _extract_assistant_text(result[0]["generated_text"])
+        answer = _generate_text(pipe, tokenizer, prompt)
         _print_response_block("Assistant", answer)
 
 
 def generate_response(model_obj, tokenizer_obj, prompt):
     pipe = _build_generation_pipe(model_obj, tokenizer_obj)
-    clean_prompt = _normalize_prompt(prompt)
-    result = pipe(f"<s>[INST] {clean_prompt} [/INST]")
-    return _extract_assistant_text(result[0]["generated_text"])
+    return _generate_text(pipe, tokenizer_obj, prompt)
 
 
 def teacher_generate_dataset(output_path):
@@ -541,12 +616,87 @@ def main():
         action="store_true",
         help="Compare teacher vs student-base vs student-tuned on the same prompt",
     )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.7,
+        help="Generation temperature (set 0 for greedy decoding)",
+    )
+    parser.add_argument(
+        "--top-p",
+        type=float,
+        default=0.9,
+        help="Nucleus sampling top-p value",
+    )
+    parser.add_argument(
+        "--repetition-penalty",
+        type=float,
+        default=1.1,
+        help="Penalty to reduce repetitive outputs",
+    )
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=200,
+        help="Maximum number of newly generated tokens",
+    )
+    parser.add_argument(
+        "--demo-mode",
+        action="store_true",
+        help="Use cleaner deterministic settings and tighter formatting for demos",
+    )
+    parser.add_argument(
+        "--dataset-jsonl",
+        default=None,
+        help="Path to local JSONL training data (supports prompt+text columns)",
+    )
+    parser.add_argument(
+        "--max-steps-train",
+        type=int,
+        default=None,
+        help="Override training max_steps",
+    )
+    parser.add_argument(
+        "--learning-rate-train",
+        type=float,
+        default=None,
+        help="Override training learning rate",
+    )
+    parser.add_argument(
+        "--num-train-epochs-override",
+        type=float,
+        default=None,
+        help="Override number of training epochs",
+    )
     args = parser.parse_args()
 
-    global model_name
+    global model_name, demo_mode, dataset_jsonl_path
+    global gen_temperature, gen_top_p, gen_repetition_penalty, gen_max_new_tokens
+    global max_steps, learning_rate, num_train_epochs
     if args.base_model:
         model_name = args.base_model
         print(f"Using overridden base model: {model_name}")
+    demo_mode = args.demo_mode
+
+    gen_temperature = args.temperature
+    gen_top_p = args.top_p
+    gen_repetition_penalty = args.repetition_penalty
+    gen_max_new_tokens = args.max_new_tokens
+    if demo_mode:
+        gen_temperature = 0.2
+        gen_top_p = 0.9
+        gen_repetition_penalty = 1.15
+        print(
+            "Demo mode enabled: temperature=0.2, top_p=0.9, "
+            "repetition_penalty=1.15"
+        )
+    dataset_jsonl_path = args.dataset_jsonl
+    if args.max_steps_train is not None:
+        max_steps = args.max_steps_train
+    if args.learning_rate_train is not None:
+        learning_rate = args.learning_rate_train
+    if args.num_train_epochs_override is not None:
+        num_train_epochs = args.num_train_epochs_override
 
     ran_special_flow = False
     if args.report_size:
