@@ -1,0 +1,43 @@
+10-question benchmark
+
+ML Metrics
+“Given TP=42, FP=18, FN=8, TN=132, compute precision, recall, F1, and accuracy step by step. Round to 3 decimals.”
+
+Structured Advice
+“I’m overfitting a text classifier. Give exactly 5 fixes; for each: why it helps, one downside, and one hyperparameter/value to try.”
+
+Algorithm + Complexity
+“Write a Python function for topological sort with cycle detection and explain the time and space complexity.”
+
+Debug Playbook
+“API latency jumps from 120ms to 900ms at peak load. Give an ordered debugging checklist with metrics to inspect and stop/go criteria.”
+
+SQL Reasoning
+“Write SQL for 7-day rolling average revenue per product and explain why a window function is appropriate.”
+
+Audience Adaptation
+“Explain transformer attention for (a) a 10-year-old, (b) a software engineer, (c) a data scientist.”
+
+Code Review Quality
+“Review this snippet and list exactly 7 issues grouped into correctness, performance, readability:
+def dedupe(xs):    out = []    for x in xs:        if x not in out:            out.append(x)    return sorted(out)
+”
+
+Planning Under Constraints
+“Create a 2-week plan to learn transformers with 1 hour/day. Output as Day 1–Day 14 with one concrete task each day.”
+
+Trade-off Analysis
+“Should a startup use RAG or fine-tuning for customer support? Give a decision framework with 5 criteria and a recommendation template.”
+
+Error Analysis
+“A classifier has 95% accuracy but users complain. Give 6 plausible reasons and how to validate each reason.”
+
+
+Quick scoring rubric (0–2 each, per question)
+Instruction following (format/count constraints respected)
+Correctness (facts/math/code logic)
+Depth (non-generic, useful detail)
+Clarity (organized, easy to act on)
+Hallucination risk (makes unsupported claims?)
+Total per question: 10
+Total across 10 questions: 100
