@@ -688,11 +688,35 @@ def main():
         default=None,
         help="Override number of training epochs",
     )
+    parser.add_argument(
+        "--batch-size-train",
+        type=int,
+        default=None,
+        help="Override per-device training batch size",
+    )
+    parser.add_argument(
+        "--grad-accum-train",
+        type=int,
+        default=None,
+        help="Override gradient accumulation steps",
+    )
+    parser.add_argument(
+        "--max-seq-length-train",
+        type=int,
+        default=None,
+        help="Override max sequence length used by SFTTrainer",
+    )
+    parser.add_argument(
+        "--low-vram",
+        action="store_true",
+        help="Apply safer defaults for ~16-24GB GPUs to reduce OOM risk",
+    )
     args = parser.parse_args()
 
     global model_name, demo_mode, dataset_jsonl_path
     global gen_temperature, gen_top_p, gen_repetition_penalty, gen_max_new_tokens
     global max_steps, learning_rate, num_train_epochs
+    global per_device_train_batch_size, gradient_accumulation_steps, max_seq_length, optim
     if args.base_model:
         model_name = args.base_model
         print(f"Using overridden base model: {model_name}")
@@ -717,6 +741,24 @@ def main():
         learning_rate = args.learning_rate_train
     if args.num_train_epochs_override is not None:
         num_train_epochs = args.num_train_epochs_override
+    if args.batch_size_train is not None:
+        per_device_train_batch_size = args.batch_size_train
+    if args.grad_accum_train is not None:
+        gradient_accumulation_steps = args.grad_accum_train
+    if args.max_seq_length_train is not None:
+        max_seq_length = args.max_seq_length_train
+
+    if args.low_vram:
+        # Safe profile for 16-24GB class GPUs.
+        per_device_train_batch_size = 1
+        gradient_accumulation_steps = max(gradient_accumulation_steps, 16)
+        max_seq_length = 256
+        optim = "paged_adamw_8bit"
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+        print(
+            "Low VRAM mode enabled: batch_size=1, grad_accum>=16, "
+            "max_seq_length=256, optim=paged_adamw_8bit"
+        )
 
     ran_special_flow = False
     if args.report_size:
