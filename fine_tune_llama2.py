@@ -20,6 +20,10 @@ from transformers import (
 from peft import LoraConfig, PeftModel
 from trl import SFTTrainer
 
+# Environment setup:
+# - macOS / Apple Silicon: pip install -r requirements-mac.txt
+# - CUDA GPU (RunPod, etc): pip install -r requirements-cuda.txt
+
 # The model that you want to train from the Hugging Face hub
 model_name = "NousResearch/Llama-2-7b-chat-hf"
 
@@ -577,7 +581,13 @@ def report_size():
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Train and/or run prompt on fine-tuned model.")
+    parser = argparse.ArgumentParser(
+        description="Train and/or run prompt on fine-tuned model.",
+        epilog=(
+            "Dependency setup: use requirements-mac.txt on macOS/Apple Silicon, "
+            "or requirements-cuda.txt on CUDA GPUs."
+        ),
+    )
     parser.add_argument(
         "--base-model",
         default=None,
