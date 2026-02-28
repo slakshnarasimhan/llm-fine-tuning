@@ -160,6 +160,16 @@ def build_bnb_config():
     local_use_4bit = use_4bit and has_cuda
     if use_4bit and not has_cuda:
         print("CUDA is not available. Disabling 4-bit quantization (use_4bit=False).")
+    if local_use_4bit and not hasattr(torch.nn.Module, "set_submodule"):
+        print(
+            "Current torch build does not support nn.Module.set_submodule; "
+            "disabling 4-bit quantization for compatibility."
+        )
+        print(
+            f"Detected torch version: {torch.__version__}. "
+            "Upgrade torch to a newer build (recommended) to re-enable 4-bit."
+        )
+        local_use_4bit = False
 
     if compute_dtype == torch.float16 and local_use_4bit and has_cuda:
         major, _ = torch.cuda.get_device_capability()
