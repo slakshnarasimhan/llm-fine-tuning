@@ -356,6 +356,7 @@ def build_training_arguments():
         "lr_scheduler_type": lr_scheduler_type,
         "dataloader_pin_memory": False,
         "report_to": report_to,
+	"completion_only_loss": False,
     }
     supported_args = inspect.signature(TrainingArguments.__init__).parameters
     filtered_training_kwargs = {k: v for k, v in training_kwargs.items() if k in supported_args}
@@ -387,8 +388,6 @@ def build_trainer(model, tokenizer, dataset):
         trainer_kwargs["processing_class"] = tokenizer
     if "dataset_text_field" in sft_signature:
         trainer_kwargs["dataset_text_field"] = "text"
-    if "formatting_func" in sft_signature:
-        trainer_kwargs["formatting_func"] = lambda example: example["text"]
     if "max_seq_length" in sft_signature:
         trainer_kwargs["max_seq_length"] = max_seq_length
     if "packing" in sft_signature:

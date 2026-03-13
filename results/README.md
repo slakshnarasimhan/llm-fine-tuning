@@ -36,7 +36,7 @@ This model was trained with SFT.
 ### Framework versions
 
 - TRL: 0.29.0
-- Transformers: 5.2.0
+- Transformers: 5.3.0
 - Pytorch: 2.10.0
 - Datasets: 4.6.0
 - Tokenizers: 0.22.2
