@@ -31,7 +31,7 @@ model_name = "NousResearch/Llama-2-7b-chat-hf"
 dataset_name = "mlabonne/guanaco-llama2-1k"
 
 # Fine-tuned model name
-new_model = "Llama-2-7b-chat-finetune"
+new_model = "llama2-7b-chat-finetune"
 teacher_model_name = "meta-llama/Llama-3.1-8B-Instruct"
 
 # Hardware detection

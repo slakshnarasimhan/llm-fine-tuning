@@ -3,8 +3,8 @@ from peft import PeftModel
 import torch, os
 
 base_model = "NousResearch/Llama-2-7b-chat-hf"
-adapter_dir = "Llama-2-7b-chat-finetune"
-out_dir = "llama2-7b-merged-aligned"
+adapter_dir = "llama2-7b-chat-finetune"
+out_dir = "llama2-7b-merged"
 
 # load tokenizer first to get authoritative vocab size
 tok = AutoTokenizer.from_pretrained(base_model, use_fast=False)
