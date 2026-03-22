@@ -1,129 +1,175 @@
-# LLM Fine-Tuning Demo
+# LLM Fine-Tuning to Phone-Ready GGUF
 
-This repo contains a single script, `fine_tune_llama2.py`, that supports:
+This repo provides a step-by-step pipeline to:
 
-- LoRA fine-tuning
-- single-prompt inference
-- interactive inference shell
-- teacher/student comparison and dataset generation
-- size reporting
+1. generate a teacher dataset,
+2. fine-tune a student LLM with LoRA,
+3. merge LoRA into a full Hugging Face model,
+4. convert to GGUF,
+5. quantize for edge/mobile-friendly inference,
+6. test with `llama.cpp`.
 
-## 1) Environment Setup
+The intended execution order is numeric scripts `1` to `5`, with `fine_tune_llama2.py` run after step `1` to produce the LoRA adapter used by step `2`.
 
-Use one of the dependency files:
+## Prerequisites
+
+## 1) Python environment
+
+Create and activate a virtual environment:
+
+```bash
+python -m venv venv
+source venv/bin/activate
+```
+
+Install dependencies:
 
 - macOS / Apple Silicon:
 
 ```bash
-python -m venv venv
-source venv/bin/activate
 pip install -r requirements-mac.txt
 ```
 
-- CUDA GPU (RunPod, etc):
+- CUDA GPU:
 
 ```bash
-python -m venv venv
-source venv/bin/activate
 pip install -r requirements-cuda.txt
 ```
 
-## 2) Core Ways to Run
-
-### Train Only
+Install OpenAI SDK (required by `1.generate-teacher-response.py`):
 
 ```bash
-python fine_tune_llama2.py --mode train
+pip install openai
 ```
 
-### Prompt Once (non-interactive)
+## 2) Environment variables
+
+Set your OpenAI API key for teacher-data generation:
 
 ```bash
-python fine_tune_llama2.py --mode prompt --prompt "What is a large language model?"
+export OPENAI_API_KEY="your_openai_api_key"
 ```
 
-### Interactive Shell
+Optional but recommended for Hugging Face model downloads:
 
 ```bash
-python fine_tune_llama2.py --interactive
+export HF_TOKEN="your_huggingface_token"
 ```
 
-Type prompts and use `exit` / `quit` to stop.
+## 3) `llama.cpp` checkout and build
 
-## 3) Demo-Friendly Inference
-
-Use cleaner decoding/formatting for presentations:
+Steps `3`, `4`, and `5` assume a local folder named `llama.cpp` at repo root with built binaries and conversion tools.
 
 ```bash
-python fine_tune_llama2.py --interactive --demo-mode --max-new-tokens 220
+git clone https://github.com/ggml-org/llama.cpp.git
+cmake -S llama.cpp -B llama.cpp/build
+cmake --build llama.cpp/build -j
 ```
 
-Manual decoding controls:
+Expected paths after build:
+
+- `llama.cpp/convert_hf_to_gguf.py`
+- `llama.cpp/build/bin/llama-quantize`
+- `llama.cpp/build/bin/llama-cli`
+
+## Run the full pipeline (in order)
+
+Run all commands from repository root.
+
+## Step 1 - Generate teacher dataset
 
 ```bash
-python fine_tune_llama2.py \
-  --mode prompt \
-  --prompt "Explain attention in transformers." \
-  --temperature 0.2 \
-  --top-p 0.9 \
-  --repetition-penalty 1.15 \
-  --max-new-tokens 220
+python 1.generate-teacher-response.py
 ```
 
-## 4) Distillation / Local JSONL Training
+Output:
 
-If you have local JSONL with `prompt` and `text` fields:
+- `teacher_dataset_250.jsonl`
+
+## Step 2 - Fine-tune the student model (LoRA adapter)
+
+Use the dataset from step 1:
 
 ```bash
 python fine_tune_llama2.py \
   --mode train \
-  --dataset-jsonl teacher_sft_data.jsonl \
-  --max-steps-train 600 \
-  --learning-rate-train 8e-5 \
-  --num-train-epochs-override 2
+  --dataset-jsonl teacher_dataset_250.jsonl
 ```
 
-## 5) Teacher Dataset Generation (HF teacher)
+Expected output directory (consumed by step 3):
+
+- `llama2-7b-chat-finetune`
+
+Note: on non-CUDA machines, `fine_tune_llama2.py` auto-switches to TinyLlama defaults for feasibility.
+
+## Step 3 - Merge LoRA adapter into base model
 
 ```bash
-python fine_tune_llama2.py --teacher-generate-dataset
+python 2.merge_lora.py
 ```
 
-Optional custom path:
+This script expects:
+
+- base model: `NousResearch/Llama-2-7b-chat-hf`
+- adapter dir: `llama2-7b-chat-finetune`
+
+Output:
+
+- `llama2-7b-merged/`
+
+## Step 4 - Convert merged HF model to GGUF (f16)
 
 ```bash
-python fine_tune_llama2.py --teacher-generate-dataset my_teacher_data.jsonl
+bash 3.generate-gguf.sh
 ```
 
-## 6) Evaluate Teacher vs Student
+Input:
+
+- `llama2-7b-merged/`
+
+Output:
+
+- `llama2-7b-merged-f16.gguf`
+
+## Step 5 - Quantize GGUF for edge/mobile usage
 
 ```bash
-python fine_tune_llama2.py \
-  --evaluate \
-  --prompt "Should a startup use RAG or fine-tuning for customer support?"
+bash 4.quantize.sh
 ```
 
-## 7) Size Reporting
+Input:
+
+- `llama2-7b-merged-f16.gguf`
+
+Output:
+
+- `llama2-7b-merged-q2_k.gguf`
+
+## Step 6 - Test the quantized model
 
 ```bash
-python fine_tune_llama2.py --report-size
+bash 5.test.sh
 ```
 
-## 8) Override Student Base Model
+This runs `llama-cli` with:
 
-```bash
-python fine_tune_llama2.py \
-  --base-model TinyLlama/TinyLlama-1.1B-Chat-v1.0 \
-  --interactive
-```
+- model: `llama2-7b-merged-q2_k.gguf`
+- context length: `1024`
+- output tokens: `128`
+- CPU execution (`-ngl 0`)
+
+## Quick sanity checklist
+
+Before running step `n`, verify step `n-1` output exists:
+
+- before step 2: `teacher_dataset_250.jsonl`
+- before step 3: `llama2-7b-chat-finetune/`
+- before step 4: `llama2-7b-merged/`
+- before step 5: `llama2-7b-merged-f16.gguf`
+- before step 6: `llama2-7b-merged-q2_k.gguf`
 
 ## Notes
 
-- On macOS, CUDA is not available; script uses MPS/CPU paths.
-- For HF downloads/rate limits, set a token:
-
-```bash
-export HF_TOKEN="your_token_here"
-```
-
-- In zsh, always use normal ASCII quotes (`"` or `'`) for prompts, not smart quotes.
+- Use normal ASCII quotes in zsh commands (`"` or `'`), not smart quotes.
+- If model download/auth errors occur, check `OPENAI_API_KEY` and `HF_TOKEN`.
+- The current quantization script uses `Q2_K` (very small, lower quality). For better quality on stronger phones, try a higher-bit quantization in `4.quantize.sh`.
