@@ -1,6 +1,7 @@
 accelerate
 datasets
 huggingface_hub
+openai
 peft
 safetensors
 sentencepiece

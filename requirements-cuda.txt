@@ -2,6 +2,7 @@ accelerate
 bitsandbytes
 datasets
 huggingface_hub
+openai
 peft
 safetensors
 sentencepiece
